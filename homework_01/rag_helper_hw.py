@@ -23,23 +23,18 @@ class RAGBase:
         llm_client,
         instructions=INSTRUCTIONS,
         prompt_template=PROMPT_TEMPLATE,
-        filename='01-agentic-rag/lessons/14-agentic-loop.md',
         model='gpt-5.4-mini'
     ):
         self.index = index
         self.llm_client = llm_client
         self.instructions = instructions
-        self.filename = filename
         self.prompt_template = prompt_template
         self.model = model
 
     def search(self, query, num_results=5):
-        filter_dict = {'filename': self.filename}
-
         return self.index.search(
             query,
-            num_results=num_results,
-            filter_dict=filter_dict
+            num_results=num_results
         )
 
     def build_context(self, search_results):
