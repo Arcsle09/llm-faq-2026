@@ -1,0 +1,67 @@
+Here’s a simple **Kestra flow** that downloads NYC taxi CSV data, loads it into **Google BigQuery**, and is ready to run.
+
+## Example Kestra Flow
+
+```yaml
+id: nyc_taxi_csv_to_bigquery
+namespace: demo.bigquery
+
+inputs:
+  - name: csv_url
+    type: STRING
+    defaults: "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.csv"
+  - name: gcp_project_id
+    type: STRING
+  - name: bq_dataset
+    type: STRING
+    defaults: nyc_taxi
+  - name: bq_table
+    type: STRING
+    defaults: yellow_tripdata
+
+tasks:
+  - id: download_csv
+    type: io.kestra.plugin.core.http.Download
+    uri: "{{ inputs.csv_url }}"
+    destination: "{{ workingDir }}/nyc_taxi.csv"
+
+  - id: load_to_bigquery
+    type: io.kestra.plugin.gcp.bigquery.Load
+    projectId: "{{ inputs.gcp_project_id }}"
+    location: US
+    sourceUris:
+      - "file://{{ workingDir }}/nyc_taxi.csv"
+    destinationTable: "{{ inputs.gcp_project_id }}.{{ inputs.bq_dataset }}.{{ inputs.bq_table }}"
+    format: CSV
+    csvOptions:
+      skipLeadingRows: 1
+      fieldDelimiter: ","
+      quote: "\""
+      allowJaggedRows: true
+      allowQuotedNewlines: true
+    writeDisposition: WRITE_TRUNCATE
+    createDisposition: CREATE_IF_NEEDED
+    autodetect: true
+```
+
+## What it does
+- **Downloads** a NYC taxi CSV file from the public NYC TLC bucket
+- **Loads** the CSV into BigQuery
+- **Autodetects** the schema
+- **Truncates** the destination table before loading
+
+## Notes
+- Replace `gcp_project_id` with your actual GCP project ID when running the flow.
+- Make sure Kestra has access to GCP credentials via a service account.
+- If you want to append instead of replace, change:
+  ```yaml
+  writeDisposition: WRITE_APPEND
+  ```
+
+## If you want to create the dataset too
+If your dataset might not exist yet, you can add a BigQuery dataset creation task before the load.
+
+If you'd like, I can also provide:
+1. a version that **creates the dataset and table automatically**,  
+2. a version using **GCS as staging**, or  
+3. a **parameterized monthly NYC taxi ingestion flow**.

@@ -1,11 +1,9 @@
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
-
 import requests
 import yaml
 from dotenv import load_dotenv
-
 
 load_dotenv()
 
@@ -16,7 +14,7 @@ class KestraClient:
         base_url: Optional[str] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
-        timeout: int = 15,
+        timeout: int = 50,
     ):
         self.base_url = (base_url or os.getenv("KESTRA_URL", "http://127.0.0.1:8080")).rstrip("/")
         self.timeout = timeout
@@ -58,38 +56,6 @@ class KestraClient:
 
         return parsed, content
 
-    @staticmethod
-    def _normalize_flow(obj: Any) -> Any:
-        ignore_keys = {
-            "revision",
-            "updated",
-            "deleted",
-        }
-
-        if isinstance(obj, dict):
-            cleaned = {}
-            for key, value in obj.items():
-                if key in ignore_keys:
-                    continue
-
-                value = KestraClient._normalize_flow(value)
-
-                if value in (None, "", {}, []):
-                    continue
-
-                cleaned[key] = value
-
-            return {k: cleaned[k] for k in sorted(cleaned)}
-
-        if isinstance(obj, list):
-            return [KestraClient._normalize_flow(item) for item in obj]
-
-        return obj
-
-    @classmethod
-    def _flows_equal(cls, left: Dict[str, Any], right: Dict[str, Any]) -> bool:
-        return cls._normalize_flow(left) == cls._normalize_flow(right)
-
     # ------------------------
     # Flow helpers
     # ------------------------
@@ -105,6 +71,56 @@ class KestraClient:
 
         response.raise_for_status()
         return response.json()
+
+
+
+    def generate_flow(self,
+                      user_prompt: str,
+                      provider_id: str,
+                      namespace: str,
+                      output_dir: str,
+                      conversation_id: str = ""):
+        """
+        Generate a Kestra flow using AI, save it locally, and register it.
+
+        Returns:
+            Path to the generated YAML file.
+        """
+
+        payload = {
+            "conversationId": conversation_id,
+            "userPrompt": user_prompt,
+            "yaml": "",
+            "namespace": namespace,
+            "providerId": provider_id,
+        }
+
+        response = self._request(
+            "POST",
+            f"/api/v1/main/ai/generate/flow",
+            headers={
+                "Accept": "application/yaml",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+
+        flow_yaml = response.text
+
+        parsed = yaml.safe_load(flow_yaml)
+
+        flow_id = parsed["id"]
+
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        file_path = output_path / f"{flow_id}_kestra.yaml"
+
+        file_path.write_text(flow_yaml, encoding="utf-8")
+
+        self.register_flow(str(file_path))
+
+        return file_path
 
     def create_flow(self, yaml_file: str | Path) -> Dict[str, str]:
         parsed, content = self._load_yaml(yaml_file)
@@ -144,29 +160,27 @@ class KestraClient:
             "flow_id": flow_id,
         }
 
-    def upsert_flow(self, yaml_file: str | Path) -> Dict[str, str]:
-        parsed, _ = self._load_yaml(yaml_file)
+    def register_flow(self, yaml_file):
+        parsed, content = self._load_yaml(yaml_file)
+
         namespace = parsed["namespace"]
         flow_id = parsed["id"]
 
-        existing = self.get_flow(namespace, flow_id)
+        response = self.session.get(
+            f"{self.base_url}/api/v1/main/flows/{namespace}/{flow_id}"
+        )
 
-        if existing is None:
-            return self.create_flow(yaml_file)
-
-        if self._flows_equal(existing, parsed):
-            print(f"{namespace}.{flow_id} already up to date.")
-            return {
-                "action": "unchanged",
-                "namespace": namespace,
-                "flow_id": flow_id,
-            }
-
-        return self.update_flow(yaml_file)
-
-    def register_flow(self, yaml_file: str | Path) -> Dict[str, str]:
-        return self.upsert_flow(yaml_file)
-
+        if response.status_code == 404:
+            self._request(
+                "POST",
+                "/api/v1/main/flows",
+                headers={"Content-Type": "application/x-yaml"},
+                data=content,
+            )
+            print(f"Registered {namespace}.{flow_id}")
+        else:
+            print(f'Flow {namespace}.{flow_id} already exists')
+        
     # ------------------------
     # Execution helpers
     # ------------------------
@@ -186,5 +200,44 @@ class KestraClient:
         )
 
         execution = response.json()
-        print(f"Execution State: {execution['state']['current']}")
         return execution
+    
+    from typing import Optional
+
+
+    def get_execution_logs(self,
+                       execution_id: str,
+                        level: str = "INFO",
+                        task_run_id: Optional[str] = None,
+                        attempt: Optional[int] = None):
+        """
+        Retrieve logs for a Kestra execution.
+
+        Args:
+            execution_id: Execution ID.
+            level: Minimum log level (default: INFO).
+                Valid values: TRACE, DEBUG, INFO, WARN, ERROR
+            task_run_id: Filter logs for a specific task run.
+            attempt: Filter by execution attempt.
+
+        Returns:
+            List of log entries.
+        """
+
+        params = {
+            "minLevel": level.upper(),
+        }
+
+        if task_run_id:
+            params["taskRunId"] = task_run_id
+
+        if attempt is not None:
+            params["attempt"] = attempt
+
+        response = self._request(
+            "GET",
+            f"/api/v1/main/logs/{execution_id}",
+            params=params,
+        )
+
+        return response.json()
