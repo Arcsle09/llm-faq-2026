@@ -1,9 +1,11 @@
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
 import requests
 import yaml
+from typing import Any, Dict, Optional
 from dotenv import load_dotenv
+
+
 
 load_dotenv()
 
@@ -190,19 +192,61 @@ class KestraClient:
         namespace: str,
         flow_id: str,
         inputs: Optional[Dict[str, Any]] = None,
-        wait: bool = True,
+        wait: bool = False,
     ) -> Dict[str, Any]:
-        response = self._request(
-            "POST",
-            f"/api/v1/main/executions/{namespace}/{flow_id}",
-            params={"wait": str(wait).lower()},
-            data=inputs or {},
-        )
+        """
+        Execute a Kestra flow.
 
-        execution = response.json()
-        return execution
-    
-    from typing import Optional
+        Args:
+            namespace: Flow namespace.
+            flow_id: Flow ID.
+            inputs: Flow inputs as a dictionary.
+            wait: Wait for execution to complete.
+
+        Returns:
+            Execution metadata.
+        """
+
+        params = {"wait": str(wait).lower()}
+
+        # Convert inputs to multipart/form-data
+        files = None
+        if inputs:
+            files = {
+                key: (None, str(value))
+                for key, value in inputs.items()
+            }
+
+        headers = {
+            "Accept": "application/json"
+        }
+
+        # Preferred endpoint (current API)
+        endpoint = f"/api/v1/main/executions/{namespace}/{flow_id}"
+
+        try:
+            response = self._request(
+                "POST",
+                endpoint,
+                params=params,
+                headers=headers,
+                files=files,
+            )
+            return response.json()
+
+        except requests.HTTPError as exc:
+            # Fall back for Kestra versions where trigger endpoint is still required
+            if exc.response is not None and exc.response.status_code in (404, 405, 415):
+                response = self._request(
+                    "POST",
+                    f"/api/v1/main/executions/trigger/{namespace}/{flow_id}",
+                    params=params,
+                    headers=headers,
+                    files=files,
+                )
+                return response.json()
+
+            raise
 
 
     def get_execution_logs(self,

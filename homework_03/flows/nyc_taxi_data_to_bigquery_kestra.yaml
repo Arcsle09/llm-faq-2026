@@ -1,0 +1,18 @@
+id: nyc_taxi_data_to_bigquery
+namespace: dev
+
+tasks:
+  - id: download_nyc_taxi_data
+    type: io.kestra.plugin.core.http.Download
+    uri: https://docs.kestra.io/datasets/nyc_taxi_trip_data.csv
+
+  - id: load_to_bigquery
+    type: io.kestra.plugin.gcp.bigquery.Load
+    from: "{{outputs.download_nyc_taxi_data.uri}}"
+    destinationTable: your_project.your_dataset.your_table # IMPORTANT: Replace with your actual BigQuery destination table
+    format: CSV
+    csvOptions:
+      skipLeadingRows: 1 # Skips the header row in the CSV file
+    autodetect: true # Automatically detects the schema from the CSV file
+    projectId: your_gcp_project_id # IMPORTANT: Replace with your GCP project ID
+    serviceAccount: "{{secret('GCP_SERVICE_ACCOUNT')}}" # IMPORTANT: Ensure you have a Kestra secret named 'GCP_SERVICE_ACCOUNT' containing your GCP service account key

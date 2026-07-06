@@ -1,0 +1,58 @@
+```yaml
+id: nyc_taxi_csv_to_bigquery
+namespace: dev.demo
+
+inputs:
+  - name: csv_url
+    type: STRING
+    defaults: "https://example.com/nyc_taxi.csv"
+
+  - name: gcp_project_id
+    type: STRING
+    defaults: "my-gcp-project"
+
+  - name: gcp_dataset
+    type: STRING
+    defaults: "analytics"
+
+  - name: gcp_table
+    type: STRING
+    defaults: "nyc_taxi"
+
+tasks:
+  - id: download_csv
+    type: io.kestra.plugin.core.http.Download
+    uri: "{{ inputs.csv_url }}"
+
+  - id: upload_to_gcs
+    type: io.kestra.plugin.gcp.gcs.Upload
+    from: "{{ outputs.download_csv.uri }}"
+    bucket: "my-bucket"
+    key: "nyc_taxi/{{ execution.id }}.csv"
+
+  - id: load_bigquery
+    type: io.kestra.plugin.gcp.bigquery.Load
+    projectId: "{{ inputs.gcp_project_id }}"
+    location: US
+    csvOptions:
+      skipLeadingRows: 1
+      fieldDelimiter: ","
+      quote: "\""
+    format: CSV
+    sourceUris:
+      - "gs://my-bucket/nyc_taxi/{{ execution.id }}.csv"
+    destinationTable: "{{ inputs.gcp_project_id }}.{{ inputs.gcp_dataset }}.{{ inputs.gcp_table }}"
+    writeDisposition: WRITE_TRUNCATE
+    autodetect: true
+```
+
+### Notes
+- Replace `my-bucket` with your GCS bucket.
+- This flow:
+  1. Downloads the CSV from a URL
+  2. Uploads it to GCS
+  3. Loads the file into BigQuery
+
+If you want, I can also provide:
+- a **production-ready version** with service account references and retries, or
+- a version that **downloads NYC taxi data directly from the NYC open data source**.
